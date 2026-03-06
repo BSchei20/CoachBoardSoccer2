@@ -4,15 +4,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; background: #222; font-family: -apple-system, sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; touch-action: none; }
-        #controls { background: #000; padding: 10px; display: flex; justify-content: center; gap: 8px; z-index: 30; border-bottom: 1px solid #444; }
-        select { padding: 8px; border-radius: 5px; background: #333; color: white; border: 1px solid #555; font-size: 14px; }
-        button { padding: 8px 12px; border-radius: 5px; cursor: pointer; background: #444; color: white; border: none; font-weight: bold; }
+        #controls { background: #000; padding: 10px; display: flex; justify-content: center; gap: 6px; z-index: 30; border-bottom: 1px solid #444; flex-wrap: wrap; }
         
+        .btn { padding: 8px 10px; border-radius: 5px; background: #333; color: white; border: 1px solid #555; font-size: 13px; cursor: pointer; font-weight: 500; }
+        select { padding: 8px; border-radius: 5px; background: #333; color: white; border: 1px solid #555; font-size: 13px; }
+        
+        /* Tool Active States */
+        .btn-active { border-color: #fff; background: #555; box-shadow: 0 0 5px rgba(255,255,255,0.5); }
+        #drawBtn.btn-active { color: #fff; border-bottom: 3px solid #000; }
+        #redDrawBtn.btn-active { color: #ff4d4d; border-bottom: 3px solid #ff4d4d; }
+        #eraseBtn.btn-active { color: #aaa; border-bottom: 3px solid #fff; }
+
         #field { 
             position: relative; flex-grow: 1; background-color: #5d8a3d; 
             background-image: linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px);
             background-size: 100% 10%; overflow: hidden;
         }
+
+        #drawLayer { position: absolute; top: 0; left: 0; z-index: 5; touch-action: none; }
 
         .line { position: absolute; border: 2px solid white; pointer-events: none; }
         .center-circle { width: 70px; height: 70px; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
@@ -38,15 +47,20 @@
 
 <div id="controls">
     <select id="formationSelect" onchange="applyTactics()">
-        <option value="">Choose Formation</option>
-        <option value="11v11">11 v 11 (Standard)</option>
-        <option value="9v9">9 v 9 (Tactical)</option>
-        <option value="6v6">6 v 6 (Small Sided)</option>
+        <option value="">Formation</option>
+        <option value="11v11">11 v 11</option>
+        <option value="9v9">9 v 9</option>
+        <option value="6v6">6 v 6</option>
     </select>
-    <button onclick="resetBoard()">Reset to Sidelines</button>
+    <button class="btn btn-active" id="drawBtn" onclick="setTool('draw', 'black')">Black</button>
+    <button class="btn" id="redDrawBtn" onclick="setTool('draw', '#d32f2f')">Red</button>
+    <button class="btn" id="eraseBtn" onclick="setTool('erase')">Eraser</button>
+    <button class="btn" onclick="clearCanvas()">Clear Lines</button>
+    <button class="btn" onclick="resetBoard()">Reset All</button>
 </div>
 
 <div id="field">
+    <canvas id="drawLayer"></canvas>
     <div class="line half-line"></div>
     <div class="line center-circle"></div>
     <div class="line box top-box"></div>
@@ -57,10 +71,15 @@
 <script>
     const layer = document.getElementById('pieces-layer');
     const field = document.getElementById('field');
+    const canvas = document.getElementById('drawLayer');
+    const ctx = canvas.getContext('2d');
+    
+    let isDrawing = false;
+    let currentTool = 'draw';
+    let currentColor = 'black';
     let redTeam = {};
     let blueTeam = {};
 
-    // Coordinates mirrored exactly from your screenshots
     const tacticalMaps = {
         "11v11": {
             nums: [1, 2, 3, 4, 5, 6, 8, 10, 11, 7, 9],
@@ -85,6 +104,42 @@
         }
     };
 
+    function initCanvas() {
+        canvas.width = field.clientWidth;
+        canvas.height = field.clientHeight;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 2; 
+    }
+
+    function setTool(tool, color) {
+        currentTool = tool;
+        if(color) currentColor = color;
+        
+        document.getElementById('drawBtn').classList.toggle('btn-active', tool === 'draw' && currentColor === 'black');
+        document.getElementById('redDrawBtn').classList.toggle('btn-active', tool === 'draw' && currentColor !== 'black');
+        document.getElementById('eraseBtn').classList.toggle('btn-active', tool === 'erase');
+    }
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    canvas.onpointerdown = (e) => {
+        isDrawing = true;
+        ctx.beginPath();
+        ctx.moveTo(e.offsetX, e.offsetY);
+    };
+
+    canvas.onpointermove = (e) => {
+        if (!isDrawing) return;
+        ctx.globalCompositeOperation = currentTool === 'erase' ? 'destination-out' : 'source-over';
+        ctx.strokeStyle = currentColor;
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+    };
+
+    canvas.onpointerup = () => { isDrawing = false; };
+
     function createPiece(num, color, x, y) {
         const p = document.createElement('div');
         p.className = `piece ${color}`;
@@ -93,6 +148,7 @@
         p.style.top = y + 'px';
         
         p.onpointerdown = (e) => {
+            e.stopPropagation();
             p.style.transition = 'none';
             p.setPointerCapture(e.pointerId);
             p.onpointermove = (ev) => {
@@ -108,13 +164,13 @@
 
     function resetBoard() {
         layer.innerHTML = '';
+        clearCanvas();
         redTeam = {}; blueTeam = {};
         const w = window.innerWidth;
         const h = field.offsetHeight;
         const allNums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         
         allNums.forEach((n, i) => {
-            // Sideline layout mirrored from screenshots
             redTeam[n] = createPiece(n, 'red', 12, 12 + (i * 40));
             blueTeam[n] = createPiece(n, 'blue', w - 46, 12 + (i * 40));
         });
@@ -141,7 +197,6 @@
                         piece.style.left = (px * w - 17) + 'px';
                         piece.style.top = (py * h - 17) + 'px';
                     } else {
-                        // Blue Team mirrored orientation
                         piece.style.left = (px * w - 17) + 'px';
                         piece.style.top = ((1 - py) * h - 17) + 'px';
                     }
@@ -152,8 +207,11 @@
         });
     }
 
-    resetBoard();
-    window.addEventListener('resize', resetBoard);
+    window.onload = () => {
+        initCanvas();
+        resetBoard();
+    };
+    window.onresize = initCanvas;
 </script>
 </body>
 </html>
